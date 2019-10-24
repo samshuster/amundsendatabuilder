@@ -1,0 +1,2 @@
+cluster,db,schema,table,table_uri_semicolon_separated
+gold,hive,test_schema,test_table1,dynamo://gold.test_schema/test_table2;dynamo://gold.test_schema/test_table3

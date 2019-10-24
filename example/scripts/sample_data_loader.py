@@ -338,6 +338,35 @@ def load_table_owner_data_from_csv(file_name):
         conn.commit()
 
 
+def load_table_lineage_data_from_csv(file_name):
+    # Load usage data
+    # TODO handle upstream dependencies
+    # TODO REFERENCE THE TableLineage.KEY_FORMAT
+    KEY_FORMAT = '{db}://{cluster}.{schema}/{tbl}/'
+    conn = create_connection(DB_FILE)
+    if conn:
+        cur = conn.cursor()
+        cur.execute('drop table if exists test_table_lineage_metadata')
+        cur.execute('create table if not exists test_table_lineage_metadata '
+                    '(db_name VARCHAR(64) NOT NULL, '
+                    'schema_name VARCHAR(64) NOT NULL, '
+                    'table_name VARCHAR(64) NOT NULL, '
+                    'cluster VARCHAR(128) NOT NULL, '
+                    'downstream_deps VARCHAR(1024) NOT NULL)')
+        file_loc = 'example/sample_data/' + file_name
+        with open(file_loc, 'r') as fin:
+            dr = csv.DictReader(fin)
+            to_db = [(
+                    i['cluster'],
+                    i['db'],
+                    i['schema'],
+                    i['table'],
+                    i['table_uri_semicolon_separated']) for i in dr]
+        cur.executemany("INSERT INTO test_table_lineage_metadata "
+                        "(cluster, db_name, schema_name, table_name, downstream_deps) "
+                        "VALUES (?, ?, ?, ?, ?);", to_db)
+        conn.commit()
+
 def create_last_updated_job():
     # loader saves data to these folders and publisher reads it from here
     tmp_folder = '/var/tmp/amundsen/last_updated_data'
@@ -451,6 +480,7 @@ if __name__ == "__main__":
     load_user_data_from_csv('sample_user.csv')
     load_application_data_from_csv('sample_application.csv')
     load_source_data_from_csv('sample_source.csv')
+    load_table_lineage_data_from_csv('sample_lineage.csv')
 
     if create_connection(DB_FILE):
         # start table job
@@ -491,6 +521,11 @@ if __name__ == "__main__":
         # start job_source job
         job_source = create_sample_job('test_source_metadata',
                                        'databuilder.models.table_source.TableSource')
+        job_source.launch()
+
+        # start lineage job
+        job_source = create_sample_job('test_table_lineage_metadata',
+                                       'databuilder.models.table_lineage.TableLineage')
         job_source.launch()
 
         # start last updated job

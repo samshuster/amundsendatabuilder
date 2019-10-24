@@ -23,7 +23,7 @@ class TableLineage(Neo4jCsvSerializable):
                  schema_name,  # type: str
                  table_name,  # type: str
                  cluster,  # type: str
-                 downstream_deps=None,  # type: List
+                 downstream_deps=None,  # type: Union[List, str]
                  ):
         # type: (...) -> None
         self.db = db_name.lower()
@@ -33,6 +33,8 @@ class TableLineage(Neo4jCsvSerializable):
         self.cluster = cluster.lower() if cluster else 'gold'
         # a list of downstream dependencies, each of which will follow
         # the same key
+        if isinstance(downstream_deps, str):
+            downstream_deps = downstream_deps.split(';')
         self.downstream_deps = downstream_deps
         self._node_iter = iter(self.create_nodes())
         self._relation_iter = iter(self.create_relation())
