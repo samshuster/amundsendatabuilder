@@ -8,9 +8,6 @@ from databuilder.models.neo4j_csv_serde import (
     RELATION_END_LABEL, RELATION_TYPE, RELATION_REVERSE_TYPE)
 from databuilder.publisher.neo4j_csv_publisher import UNQUOTED_SUFFIX
 
-DESCRIPTION_NODE_LABEL = 'Description'
-
-
 class TagMetadata:
     TAG_NODE_LABEL = 'Tag'
     TAG_KEY_FORMAT = '{tag}'
@@ -31,6 +28,66 @@ class TagMetadata:
         return TagMetadata.TAG_KEY_FORMAT.format(tag=name)
 
 
+class DescriptionMetadata:
+    DESCRIPTION_NODE_LABEL = 'Description'
+    DESCRIPTION_KEY_FORMAT = '{description}'
+    DESCRIPTION_TEXT = 'description'
+    DESCRIPTION_ORDER = 'description_order'
+    DESCRIPTION_EDITABLE = 'description_editable'
+
+    DESCRIPTION_RELATION_TYPE = 'DESCRIPTION'
+    INVERSE_DESCRIPTION_RELATION_TYPE = 'DESCRIPTION_OF'
+
+    # The default editable source.
+    DEFAULT_SOURCE = "default"
+
+    def __init__(self,
+                 source, # type: str
+                 text,  # type: Union[None, str]
+                 order, # type: int
+                 ):
+        """
+        :param source: The unique source of what is populating this description
+        :param text: the description text. Markdown supported.
+        :param order: the display order. Lower numbers mean it will be displayed first. Ties are handled alphabetically by source.
+        """
+        self._source = source
+        self._text = text
+        self._order = order
+        self._is_editable = False
+
+    @staticmethod
+    def create_editable_description(text, order):
+        description_node = DescriptionMetadata(DescriptionMetadata.DEFAULT_SOURCE, text, order)
+        description_node._is_editable = True
+        return description_node
+
+    def get_description_id(self):
+        # type: () -> str
+        if self._source == self.DEFAULT_SOURCE:
+            return "_description"
+        else:
+            return "_description_" + self._source
+
+    def __repr__(self):
+        # type: () -> str
+        return 'DescriptionMetadata({!r}, {!r}, {!r}, {!r})'.format(
+                                                               self._source,
+                                                               self._text,
+                                                               self._order,
+                                                               self._is_editable)
+
+    def get_node_dict(self, node_key):
+        # () -> Dict()
+        return {
+            NODE_LABEL: DescriptionMetadata.DESCRIPTION_NODE_LABEL,
+            NODE_KEY: node_key,
+            DescriptionMetadata.DESCRIPTION_TEXT: self._text,
+            DescriptionMetadata.DESCRIPTION_ORDER: self._order,
+            DescriptionMetadata.DESCRIPTION_EDITABLE: self._is_editable
+        }
+
+
 class ColumnMetadata:
     COLUMN_NODE_LABEL = 'Column'
     COLUMN_KEY_FORMAT = '{db}://{cluster}.{schema}/{tbl}/{col}'
@@ -38,11 +95,7 @@ class ColumnMetadata:
     COLUMN_TYPE = 'type'
     COLUMN_ORDER = 'sort_order{}'.format(UNQUOTED_SUFFIX)  # int value needs to be unquoted when publish to neo4j
     COLUMN_DESCRIPTION = 'description'
-    COLUMN_DESCRIPTION_FORMAT = '{db}://{cluster}.{schema}/{tbl}/{col}/_description'
-
-    # pair of nodes makes relationship where name of variable represents order of relationship.
-    COL_DESCRIPTION_RELATION_TYPE = 'DESCRIPTION'
-    DESCRIPTION_COL_RELATION_TYPE = 'DESCRIPTION_OF'
+    COLUMN_DESCRIPTION_FORMAT = '{db}://{cluster}.{schema}/{tbl}/{col}/{description_id}'
 
     # Relation between column and tag
     COL_TAG_RELATION_TYPE = 'TAGGED_BY'
@@ -54,6 +107,7 @@ class ColumnMetadata:
                  col_type,  # type: str
                  sort_order,  # type: int
                  tags=None,  # Union[List[str], None]
+                 programmatic_descriptions=None, #Union[List[DescriptionMetadata], None]]
                  ):
         # type: (...) -> None
         """
@@ -64,10 +118,12 @@ class ColumnMetadata:
         :param sort_order:
         """
         self.name = name
-        self.description = description
+        #TODO figureo out order
+        self.description = DescriptionMetadata.create_editable_description(description, 0)
         self.type = col_type
         self.sort_order = sort_order
         self.tags = tags
+        self.programmatic_descriptions = programmatic_descriptions
 
     def __repr__(self):
         # type: () -> str
@@ -98,10 +154,7 @@ class TableMetadata(Neo4jCsvSerializable):
     TABLE_NAME = 'name'
     IS_VIEW = 'is_view{}'.format(UNQUOTED_SUFFIX)  # bool value needs to be unquoted when publish to neo4j
 
-    TABLE_DESCRIPTION = 'description'
-    TABLE_DESCRIPTION_FORMAT = '{db}://{cluster}.{schema}/{tbl}/_description'
-    TABLE_DESCRIPTION_RELATION_TYPE = 'DESCRIPTION'
-    DESCRIPTION_TABLE_RELATION_TYPE = 'DESCRIPTION_OF'
+    TABLE_DESCRIPTION_FORMAT = '{db}://{cluster}.{schema}/{tbl}/{description_id}'
 
     DATABASE_NODE_LABEL = 'Database'
     DATABASE_KEY_FORMAT = 'database://{db}'
@@ -137,6 +190,7 @@ class TableMetadata(Neo4jCsvSerializable):
                  columns=None,  # type: Iterable[ColumnMetadata]
                  is_view=False,  # type: bool
                  tags=None,  # type: Union[List, str]
+                 programmatic_descriptions=None, # type: Union[None, List[DescriptionMetadata]]
                  **kwargs  # type: Dict
                  ):
         # type: (...) -> None
@@ -149,13 +203,15 @@ class TableMetadata(Neo4jCsvSerializable):
         :param columns:
         :param is_view: Indicate whether the table is a view or not
         :param tags:
+        :param programmatic_descriptions: Optional. The programmatic description objects.
         :param kwargs: Put additional attributes to the table model if there is any.
         """
         self.database = database
         self.cluster = cluster
         self.schema_name = schema_name
         self.name = name
-        self.description = description
+        #TODO figure out order
+        self.description = DescriptionMetadata.create_editable_description(description, 0)
         self.columns = columns if columns else []
         self.is_view = is_view
         self.attrs = None
@@ -164,6 +220,7 @@ class TableMetadata(Neo4jCsvSerializable):
         if isinstance(tags, list):
             tags = [tag.lower().strip() for tag in tags]
         self.tags = tags
+        self.programmatic_descriptions = programmatic_descriptions
 
         if kwargs:
             self.attrs = copy.deepcopy(kwargs)
@@ -174,14 +231,15 @@ class TableMetadata(Neo4jCsvSerializable):
     def __repr__(self):
         # type: () -> str
         return 'TableMetadata({!r}, {!r}, {!r}, {!r} ' \
-            '{!r}, {!r}, {!r}, {!r})'.format(self.database,
+            '{!r}, {!r}, {!r}, {!r}, {!r})'.format(self.database,
                                              self.cluster,
                                              self.schema_name,
                                              self.name,
                                              self.description,
                                              self.columns,
                                              self.is_view,
-                                             self.tags)
+                                             self.tags,
+                                             self.programmatic_descriptions)
 
     def _get_table_key(self):
         # type: () -> str
@@ -190,12 +248,13 @@ class TableMetadata(Neo4jCsvSerializable):
                                                      schema=self.schema_name,
                                                      tbl=self.name)
 
-    def _get_table_description_key(self):
-        # type: () -> str
+    def _get_table_description_key(self, description):
+        # type: (DescriptionMetadata) -> str
         return TableMetadata.TABLE_DESCRIPTION_FORMAT.format(db=self.database,
                                                              cluster=self.cluster,
                                                              schema=self.schema_name,
-                                                             tbl=self.name)
+                                                             tbl=self.name,
+                                                             description_id=description.get_description_id())
 
     def _get_database_key(self):
         # type: () -> str
@@ -220,13 +279,14 @@ class TableMetadata(Neo4jCsvSerializable):
                                                        tbl=self.name,
                                                        col=col.name)
 
-    def _get_col_description_key(self, col):
-        # type: (ColumnMetadata) -> str
+    def _get_col_description_key(self, col, description):
+        # type: (ColumnMetadata, DescriptionMetadata) -> str
         return ColumnMetadata.COLUMN_DESCRIPTION_FORMAT.format(db=self.database,
                                                                cluster=self.cluster,
                                                                schema=self.schema_name,
                                                                tbl=self.name,
-                                                               col=col.name)
+                                                               col=col.name,
+                                                               description_id=description.get_description_id())
 
     def create_next_node(self):
         # type: () -> Union[Dict[str, Any], None]
@@ -249,9 +309,13 @@ class TableMetadata(Neo4jCsvSerializable):
         yield table_node
 
         if self.description:
-            yield {NODE_LABEL: DESCRIPTION_NODE_LABEL,
-                   NODE_KEY: self._get_table_description_key(),
-                   TableMetadata.TABLE_DESCRIPTION: self.description}
+            node_key = self._get_table_description_key(self.description)
+            yield self.description.get_node_dict(node_key)
+
+        if self.programmatic_descriptions:
+            for programmatic_description in self.programmatic_descriptions:
+                node_key = self._get_table_description_key(programmatic_description)
+                yield programmatic_description.get_node_dict(node_key)
 
         # Create the table tag node
         if self.tags:
@@ -268,13 +332,14 @@ class TableMetadata(Neo4jCsvSerializable):
                 ColumnMetadata.COLUMN_TYPE: col.type,
                 ColumnMetadata.COLUMN_ORDER: col.sort_order}
 
-            if not col.description:
-                continue
+            if col.description:
+                node_key = self._get_table_description_key(col.description)
+                yield col.description.get_node_dict(node_key)
 
-            yield {
-                NODE_LABEL: DESCRIPTION_NODE_LABEL,
-                NODE_KEY: self._get_col_description_key(col),
-                ColumnMetadata.COLUMN_DESCRIPTION: col.description}
+            if col.programmatic_descriptions:
+                for programmatic_description in col.programmatic_descriptions:
+                    node_key = self._get_table_description_key(programmatic_description)
+                    yield programmatic_description.get_node_dict(node_key)
 
             if not col.tags:
                 continue
@@ -327,12 +392,23 @@ class TableMetadata(Neo4jCsvSerializable):
         if self.description:
             yield {
                 RELATION_START_LABEL: TableMetadata.TABLE_NODE_LABEL,
-                RELATION_END_LABEL: DESCRIPTION_NODE_LABEL,
+                RELATION_END_LABEL: DescriptionMetadata.DESCRIPTION_NODE_LABEL,
                 RELATION_START_KEY: self._get_table_key(),
-                RELATION_END_KEY: self._get_table_description_key(),
-                RELATION_TYPE: TableMetadata.TABLE_DESCRIPTION_RELATION_TYPE,
-                RELATION_REVERSE_TYPE: TableMetadata.DESCRIPTION_TABLE_RELATION_TYPE
+                RELATION_END_KEY: self._get_table_description_key(self.description),
+                RELATION_TYPE: DescriptionMetadata.DESCRIPTION_RELATION_TYPE,
+                RELATION_REVERSE_TYPE: DescriptionMetadata.INVERSE_DESCRIPTION_RELATION_TYPE
             }
+
+        if self.programmatic_descriptions:
+            for programmatic_description in self.programmatic_descriptions:
+                yield {
+                    RELATION_START_LABEL: TableMetadata.TABLE_NODE_LABEL,
+                    RELATION_END_LABEL: DescriptionMetadata.DESCRIPTION_NODE_LABEL,
+                    RELATION_START_KEY: self._get_table_key(),
+                    RELATION_END_KEY: self._get_table_description_key(programmatic_description),
+                    RELATION_TYPE: DescriptionMetadata.DESCRIPTION_RELATION_TYPE,
+                    RELATION_REVERSE_TYPE: DescriptionMetadata.INVERSE_DESCRIPTION_RELATION_TYPE
+                }
 
         if self.tags:
             for tag in self.tags:
@@ -360,12 +436,23 @@ class TableMetadata(Neo4jCsvSerializable):
 
             yield {
                 RELATION_START_LABEL: ColumnMetadata.COLUMN_NODE_LABEL,
-                RELATION_END_LABEL: DESCRIPTION_NODE_LABEL,
+                RELATION_END_LABEL: DescriptionMetadata.DESCRIPTION_NODE_LABEL,
                 RELATION_START_KEY: self._get_col_key(col),
-                RELATION_END_KEY: self._get_col_description_key(col),
-                RELATION_TYPE: ColumnMetadata.COL_DESCRIPTION_RELATION_TYPE,
-                RELATION_REVERSE_TYPE: ColumnMetadata.DESCRIPTION_COL_RELATION_TYPE
+                RELATION_END_KEY: self._get_col_description_key(col, col.description),
+                RELATION_TYPE: DescriptionMetadata.DESCRIPTION_RELATION_TYPE,
+                RELATION_REVERSE_TYPE: DescriptionMetadata.INVERSE_DESCRIPTION_RELATION_TYPE
             }
+
+            if col.programmatic_descriptions:
+                for programmatic_description in col.programmatic_descriptions:
+                    yield {
+                        RELATION_START_LABEL: ColumnMetadata.COLUMN_NODE_LABEL,
+                        RELATION_END_LABEL: DescriptionMetadata.DESCRIPTION_NODE_LABEL,
+                        RELATION_START_KEY: self._get_col_key(col),
+                        RELATION_END_KEY: self._get_col_description_key(col, programmatic_description),
+                        RELATION_TYPE: DescriptionMetadata.DESCRIPTION_RELATION_TYPE,
+                        RELATION_REVERSE_TYPE: DescriptionMetadata.INVERSE_DESCRIPTION_RELATION_TYPE
+                    }
 
             if not col.tags:
                 continue

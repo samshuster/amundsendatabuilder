@@ -107,6 +107,7 @@ class TestTableMetadata(unittest.TestCase):
             actual.append(node_row)
             node_row = self.table_metadata.next_node()
 
+        print(actual)
         self.assertEqual(self.expected_nodes, actual)
 
         relation_row = self.table_metadata.next_relation()
