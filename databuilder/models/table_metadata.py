@@ -15,6 +15,7 @@ class TagMetadata:
     TAG_NODE_LABEL = 'Tag'
     TAG_KEY_FORMAT = '{tag}'
     TAG_TYPE = 'tag_type'
+    BADGE_TYPE = '^b'
 
     def __init__(self,
                  name,  # type: str,
@@ -22,6 +23,17 @@ class TagMetadata:
                  ):
         self._name = name
         self._tag_type = tag_type
+
+    @staticmethod
+    def parse_tag_from_string(serialized_tag):
+        # type: (str) -> TagMetadata
+        if serialized_tag is None:
+            return None
+        lower_tag = serialized_tag.lower()
+        if TagMetadata.BADGE_TYPE in lower_tag:
+            return TagMetadata(lower_tag.replace(TagMetadata.BADGE_TYPE, ''), 'badge')
+        else:
+            return TagMetadata(lower_tag, 'default')
 
     @staticmethod
     def get_tag_key(name):
@@ -163,7 +175,11 @@ class TableMetadata(Neo4jCsvSerializable):
             tags = list(filter(None, tags.split(',')))
         if isinstance(tags, list):
             tags = [tag.lower().strip() for tag in tags]
-        self.tags = tags
+        parsed_tags = []
+        if tags is not None:
+            parsed_tags = [TagMetadata.parse_tag_from_string(tag) for tag in tags]
+
+        self.tags = parsed_tags
 
         if kwargs:
             self.attrs = copy.deepcopy(kwargs)
@@ -257,8 +273,8 @@ class TableMetadata(Neo4jCsvSerializable):
         if self.tags:
             for tag in self.tags:
                 yield {NODE_LABEL: TagMetadata.TAG_NODE_LABEL,
-                       NODE_KEY: TagMetadata.get_tag_key(tag),
-                       TagMetadata.TAG_TYPE: 'default'}
+                       NODE_KEY: TagMetadata.get_tag_key(tag._name),
+                       TagMetadata.TAG_TYPE: tag._tag_type}
 
         for col in self.columns:
             yield {
@@ -340,7 +356,7 @@ class TableMetadata(Neo4jCsvSerializable):
                     RELATION_START_LABEL: TableMetadata.TABLE_NODE_LABEL,
                     RELATION_END_LABEL: TagMetadata.TAG_NODE_LABEL,
                     RELATION_START_KEY: self._get_table_key(),
-                    RELATION_END_KEY: TagMetadata.get_tag_key(tag),
+                    RELATION_END_KEY: TagMetadata.get_tag_key(tag._name),
                     RELATION_TYPE: TableMetadata.TABLE_TAG_RELATION_TYPE,
                     RELATION_REVERSE_TYPE: TableMetadata.TAG_TABLE_RELATION_TYPE,
                 }

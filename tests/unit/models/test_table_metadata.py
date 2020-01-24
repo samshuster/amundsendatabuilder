@@ -157,7 +157,7 @@ class TestTableMetadata(unittest.TestCase):
         # type: () -> None
         self.table_metadata4 = TableMetadata('hive', 'gold', 'test_schema4', 'test_table4', 'test_table4', [
             ColumnMetadata('test_id1', 'description of test_table1', 'bigint', 0, ['col-tag1', 'col-tag2'])],
-            is_view=False, tags=['tag1', 'tag2'], attr1='uri', attr2='attr2')
+            is_view=False, tags=['tag1^b', 'tag2'], attr1='uri', attr2='attr2')
 
         node_row = self.table_metadata4.next_node()
         actual = []
